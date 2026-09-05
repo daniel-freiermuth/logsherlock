@@ -855,89 +855,92 @@ pub struct SomeIpSdInfo {
 
 /// Decode SOME/IP SD (Service Discovery) payload using `someip_parse` library
 fn decode_someip_sd(payload: &[u8]) -> Option<SomeIpSdInfo> {
-    use someip_parse::{SdEntry, SdOption, SomeipMsgSlice};
+    use someip_parse::sd::{SdEntrySlice, SdHeader, SdOptionSlice};
+    use someip_parse::sd::entries::{EventGroupEntryType, SdServiceEntryType};
+    use someip_parse::sd::options::TransportProtocol;
+    use someip_parse::SomeipMsgSlice;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    /// Format a slice of `SdOption` entries as compact endpoint strings.
-    fn format_endpoints(opts: &[SdOption]) -> Vec<String> {
+    /// Format a slice of SD option slices as compact endpoint strings.
+    fn format_endpoints(opts: &[SdOptionSlice]) -> Vec<String> {
         opts.iter()
             .filter_map(|opt| match opt {
-                SdOption::Ipv4Endpoint(e) => Some(format!(
+                SdOptionSlice::Ipv4Endpoint(e) => Some(format!(
                     "{}/{}:{}",
-                    Ipv4Addr::from(e.ipv4_address),
-                    proto_str(e.transport_protocol),
-                    e.port,
+                    Ipv4Addr::from(e.ipv4_address()),
+                    proto_str(e.transport_protocol()),
+                    e.port(),
                 )),
-                SdOption::Ipv6Endpoint(e) => Some(format!(
+                SdOptionSlice::Ipv6Endpoint(e) => Some(format!(
                     "[{}]/{}:{}",
-                    Ipv6Addr::from(e.ipv6_address),
-                    proto_str(e.transport_protocol),
-                    e.port,
+                    Ipv6Addr::from(e.ipv6_address()),
+                    proto_str(e.transport_protocol()),
+                    e.port(),
                 )),
-                SdOption::Ipv4Multicast(e) => Some(format!(
+                SdOptionSlice::Ipv4Multicast(e) => Some(format!(
                     "mcast:{}/{}:{}",
-                    Ipv4Addr::from(e.ipv4_address),
-                    proto_str(e.transport_protocol),
-                    e.port,
+                    Ipv4Addr::from(e.ipv4_address()),
+                    proto_str(e.transport_protocol()),
+                    e.port(),
                 )),
-                SdOption::Ipv6Multicast(e) => Some(format!(
+                SdOptionSlice::Ipv6Multicast(e) => Some(format!(
                     "mcast:[{}]/{}:{}",
-                    Ipv6Addr::from(e.ipv6_address),
-                    proto_str(e.transport_protocol),
-                    e.port,
+                    Ipv6Addr::from(e.ipv6_address()),
+                    proto_str(e.transport_protocol()),
+                    e.port(),
                 )),
-                SdOption::Configuration(_)
-                | SdOption::LoadBalancing(_)
-                | SdOption::Ipv4SdEndpoint(_)
-                | SdOption::Ipv6SdEndpoint(_)
-                | SdOption::UnknownDiscardable(_) => None,
+                SdOptionSlice::Configuration(_)
+                | SdOptionSlice::LoadBalancing(_)
+                | SdOptionSlice::Ipv4SdEndpoint(_)
+                | SdOptionSlice::Ipv6SdEndpoint(_)
+                | SdOptionSlice::Unknown(_) => None,
             })
             .collect()
     }
 
-    /// Extract `SomeIpEndpoint` objects from a slice of SD options.
-    fn extract_endpoints(opts: &[SdOption]) -> Vec<SomeIpEndpoint> {
+    /// Extract `SomeIpEndpoint` objects from a slice of SD option slices.
+    fn extract_endpoints(opts: &[SdOptionSlice]) -> Vec<SomeIpEndpoint> {
         opts.iter()
             .filter_map(|opt| match opt {
-                SdOption::Ipv4Endpoint(e) => Some(SomeIpEndpoint {
-                    addr: Ipv4Addr::from(e.ipv4_address).to_string(),
-                    port: e.port,
-                    protocol: proto_str(e.transport_protocol),
+                SdOptionSlice::Ipv4Endpoint(e) => Some(SomeIpEndpoint {
+                    addr: Ipv4Addr::from(e.ipv4_address()).to_string(),
+                    port: e.port(),
+                    protocol: proto_str(e.transport_protocol()),
                 }),
-                SdOption::Ipv6Endpoint(e) => Some(SomeIpEndpoint {
-                    addr: Ipv6Addr::from(e.ipv6_address).to_string(),
-                    port: e.port,
-                    protocol: proto_str(e.transport_protocol),
+                SdOptionSlice::Ipv6Endpoint(e) => Some(SomeIpEndpoint {
+                    addr: Ipv6Addr::from(e.ipv6_address()).to_string(),
+                    port: e.port(),
+                    protocol: proto_str(e.transport_protocol()),
                 }),
-                SdOption::Ipv4Multicast(e) => Some(SomeIpEndpoint {
-                    addr: Ipv4Addr::from(e.ipv4_address).to_string(),
-                    port: e.port,
-                    protocol: proto_str(e.transport_protocol),
+                SdOptionSlice::Ipv4Multicast(e) => Some(SomeIpEndpoint {
+                    addr: Ipv4Addr::from(e.ipv4_address()).to_string(),
+                    port: e.port(),
+                    protocol: proto_str(e.transport_protocol()),
                 }),
-                SdOption::Ipv6Multicast(e) => Some(SomeIpEndpoint {
-                    addr: Ipv6Addr::from(e.ipv6_address).to_string(),
-                    port: e.port,
-                    protocol: proto_str(e.transport_protocol),
+                SdOptionSlice::Ipv6Multicast(e) => Some(SomeIpEndpoint {
+                    addr: Ipv6Addr::from(e.ipv6_address()).to_string(),
+                    port: e.port(),
+                    protocol: proto_str(e.transport_protocol()),
                 }),
-                SdOption::Configuration(_)
-                | SdOption::LoadBalancing(_)
-                | SdOption::Ipv4SdEndpoint(_)
-                | SdOption::Ipv6SdEndpoint(_)
-                | SdOption::UnknownDiscardable(_) => None,
+                SdOptionSlice::Configuration(_)
+                | SdOptionSlice::LoadBalancing(_)
+                | SdOptionSlice::Ipv4SdEndpoint(_)
+                | SdOptionSlice::Ipv6SdEndpoint(_)
+                | SdOptionSlice::Unknown(_) => None,
             })
             .collect()
     }
 
-    const fn proto_str(p: someip_parse::TransportProtocol) -> &'static str {
+    const fn proto_str(p: TransportProtocol) -> &'static str {
         match p {
-            someip_parse::TransportProtocol::Tcp => "TCP",
-            someip_parse::TransportProtocol::Udp => "UDP",
-            someip_parse::TransportProtocol::Generic(_) => "?",
+            TransportProtocol::Tcp => "TCP",
+            TransportProtocol::Udp => "UDP",
+            TransportProtocol::Generic(_) => "?",
         }
     }
 
     /// Collect endpoint options for an entry's two option runs.
-    fn entry_endpoints(opts: &[SdOption], idx1: u8, num1: u8, idx2: u8, num2: u8) -> String {
+    fn entry_endpoints(opts: &[SdOptionSlice], idx1: u8, num1: u8, idx2: u8, num2: u8) -> String {
         let run1_start = idx1 as usize;
         let run1_end = (run1_start + num1 as usize).min(opts.len());
         let run2_start = idx2 as usize;
@@ -967,53 +970,60 @@ fn decode_someip_sd(payload: &[u8]) -> Option<SomeIpSdInfo> {
 
     // Parse SD header using the library
     let mut cursor = std::io::Cursor::new(someip_payload);
-    let Ok(sd_header) = someip_parse::SdHeader::read(&mut cursor) else {
+    let Ok(sd_header) = SdHeader::read(&mut cursor) else {
         return None;
     };
 
+    // Collect options for indexed access by entry option runs
+    let options: Vec<SdOptionSlice> = sd_header.options().collect();
+
     // Format entries for display
     let entries = sd_header
-        .entries
-        .iter()
+        .entries()
         .map(|entry| match entry {
-            SdEntry::Service(s) => {
-                let entry_type = match s._type {
-                    someip_parse::SdServiceEntryType::FindService => "FindService",
-                    someip_parse::SdServiceEntryType::OfferService => "OfferService",
+            SdEntrySlice::Service(s) => {
+                let entry_type = match s.entry_type() {
+                    SdServiceEntryType::FindService => "FindService",
+                    SdServiceEntryType::OfferService => "OfferService",
                 };
                 let endpoints = entry_endpoints(
-                    &sd_header.options,
-                    s.index_first_option_run,
-                    s.number_of_options_1,
-                    s.index_second_option_run,
-                    s.number_of_options_2,
+                    &options,
+                    s.start_index_options_1(),
+                    s.number_of_options_1().value(),
+                    s.start_index_options_2(),
+                    s.number_of_options_2().value(),
                 );
                 format!(
                     "{}(0x{:04x}:0x{:04x} v{}.{} TTL={}{})",
                     entry_type,
-                    s.service_id,
-                    s.instance_id,
-                    s.major_version,
-                    s.minor_version,
-                    s.ttl,
+                    s.service_id(),
+                    s.instance_id(),
+                    s.major_version(),
+                    s.minor_version(),
+                    s.ttl().value(),
                     endpoints,
                 )
             }
-            SdEntry::Eventgroup(e) => {
-                let entry_type = match e._type {
-                    someip_parse::SdEventGroupEntryType::Subscribe => "Subscribe",
-                    someip_parse::SdEventGroupEntryType::SubscribeAck => "SubscribeAck",
+            SdEntrySlice::Eventgroup(e) => {
+                let entry_type = match e.entry_type() {
+                    EventGroupEntryType::SubscribeOrStop => "Subscribe",
+                    EventGroupEntryType::SubscribeAckOrNack => "SubscribeAck",
                 };
                 let endpoints = entry_endpoints(
-                    &sd_header.options,
-                    e.index_first_option_run,
-                    e.number_of_options_1,
-                    e.index_second_option_run,
-                    e.number_of_options_2,
+                    &options,
+                    e.index_first_option_run(),
+                    e.number_of_options_1().value(),
+                    e.index_second_option_run(),
+                    e.number_of_options_2().value(),
                 );
                 format!(
                     "{}(0x{:04x}:0x{:04x} eg=0x{:04x} TTL={}{})",
-                    entry_type, e.service_id, e.instance_id, e.eventgroup_id, e.ttl, endpoints,
+                    entry_type,
+                    e.service_id(),
+                    e.instance_id(),
+                    e.eventgroup_id(),
+                    e.ttl().value(),
+                    endpoints,
                 )
             }
         })
@@ -1028,7 +1038,7 @@ fn decode_someip_sd(payload: &[u8]) -> Option<SomeIpSdInfo> {
     };
 
     // Extract all endpoints from SD options for lazy discovery
-    let discovered_endpoints = extract_endpoints(&sd_header.options);
+    let discovered_endpoints = extract_endpoints(&options);
 
     Some(SomeIpSdInfo {
         message_type: msg_type.to_string(),
