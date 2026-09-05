@@ -70,7 +70,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dlt-core = "0.20"
 pcap-parser = "0.17.0"
 btsnoop = "0.2.1"
-someip_parse = "0.6.2"
+someip_parse = "0.7.2"
 opentelemetry-proto = { version = "0.31", default-features = false, features = ["gen-tonic-messages", "logs", "with-serde"] }
 rayon = "1.10"
 egui-toast = "0.19"

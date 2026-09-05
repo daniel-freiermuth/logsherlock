@@ -274,9 +274,9 @@ checksum = "76a2e8124351fda1ef8aaaa3bbd7ebbcb486bbcd4225aca0aa0d84bb2db8fecb"
 
 [[package]]
 name = "arrayvec"
-version = "0.7.6"
+version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -4296,9 +4296,12 @@ dependencies = [
 
 [[package]]
 name = "someip_parse"
-version = "0.6.2"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a94f38e4fe9cb47efc4f8f72f9cb8a249c25d686856fbf33e62b460fb4ccce1"
+checksum = "44da60f87d961190acb081d9959e51ad6de73ae20b7033b9a76a6bceb6881e92"
+dependencies = [
+ "arrayvec",
+]
 
 [[package]]
 name = "spirv"
