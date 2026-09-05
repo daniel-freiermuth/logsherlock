@@ -386,7 +386,10 @@ mod tests {
         let config = GlobalConfig::parse_contents(json);
 
         assert_eq!(config.schema_version, SCHEMA_VERSION);
-        assert!(config.bright_mode, "user setting should survive v0 migration");
+        assert!(
+            config.bright_mode,
+            "user setting should survive v0 migration"
+        );
         assert!(!config.read_only);
     }
 
@@ -409,7 +412,7 @@ mod tests {
         assert_eq!(config.favorite_filters[0].name, "errors");
     }
 
-    /// A future version (> SCHEMA_VERSION) should set `read_only = true`
+    /// A future version (> `SCHEMA_VERSION`) should set `read_only = true`
     /// and return defaults so we never silently downgrade.
     #[test]
     fn future_version_sets_read_only() {
@@ -418,7 +421,7 @@ mod tests {
 
         assert!(config.read_only);
         assert_eq!(config.schema_version, SCHEMA_VERSION); // defaults
-        // All user-configurable fields should be defaults
+                                                           // All user-configurable fields should be defaults
         assert!(!config.bright_mode);
         assert!(config.shortcuts.is_empty());
         assert!(config.favorite_filters.is_empty());
@@ -449,11 +452,10 @@ mod tests {
     fn unknown_fields_preserves_known() {
         let json = format!(
             r#"{{
-                "schema_version": {},
+                "schema_version": {SCHEMA_VERSION},
                 "bright_mode": true,
                 "totally_made_up_field": 42
             }}"#,
-            SCHEMA_VERSION
         );
         let config = GlobalConfig::parse_contents(&json);
 
@@ -462,8 +464,8 @@ mod tests {
         assert!(!config.read_only);
     }
 
-    /// A v1 config should deserialize and have its schema_version bumped
-    /// to SCHEMA_VERSION. Serde defaults fill any new fields.
+    /// A v1 config should deserialize and have its `schema_version` bumped
+    /// to `SCHEMA_VERSION`. Serde defaults fill any new fields.
     #[test]
     fn v1_config_migrates_to_current() {
         let json = r#"{ "schema_version": 1, "bright_mode": true }"#;
@@ -477,14 +479,11 @@ mod tests {
         assert!(!config.hide_duplicates);
     }
 
-    /// A config at the current SCHEMA_VERSION should deserialize as-is
+    /// A config at the current `SCHEMA_VERSION` should deserialize as-is
     /// with no migration.
     #[test]
     fn current_version_no_migration() {
-        let json = format!(
-            r#"{{ "schema_version": {}, "bright_mode": true }}"#,
-            SCHEMA_VERSION
-        );
+        let json = format!(r#"{{ "schema_version": {SCHEMA_VERSION}, "bright_mode": true }}"#);
         let config = GlobalConfig::parse_contents(&json);
 
         assert_eq!(config.schema_version, SCHEMA_VERSION);
@@ -492,8 +491,8 @@ mod tests {
         assert!(!config.read_only);
     }
 
-    /// Empty string input should fall back to defaults (the VersionProbe
-    /// parse fails, file_version becomes 0, then Value parse also fails).
+    /// Empty string input should fall back to defaults (the `VersionProbe`
+    /// parse fails, `file_version` becomes 0, then Value parse also fails).
     #[test]
     fn empty_string_falls_back_to_defaults() {
         let config = GlobalConfig::parse_contents("");
