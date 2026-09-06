@@ -738,7 +738,7 @@ impl crate::filetype::LogFileState for DltFileState {
                                             .clicked()
                                         {
                                             self.pending_jump_line.store(
-                                                sp.from_line,
+                                                sp.from_line - 1,
                                                 Ordering::Relaxed,
                                             );
                                         }
