@@ -152,8 +152,19 @@ impl LogFileLoader {
 
         let load_complete = loader.run(&mut file_type, data_source, &file_name, file_size, toast);
 
+        if toast.is_cancel_requested() {
+            tracing::info!("Loading cancelled for {}", path.display());
+            store.remove_source(source_id);
+            toast.dismiss();
+            return;
+        }
+
         if load_complete && !data_source.is_empty() {
             Self::score_lines(data_source, path, toast, start_time, store, source_id);
+            if toast.is_cancel_requested() {
+                tracing::info!("Scoring cancelled for {}", path.display());
+                store.remove_source(source_id);
+            }
         } else if data_source.is_empty() {
             toast.set_error("No log lines found in file");
         }
@@ -193,7 +204,7 @@ impl LogFileLoader {
             // ── Heuristic scoring (runs on current thread) ───────────────────────
             Self::score_heuristic(data_source, path, toast, store, source_id);
             // Dismiss the heuristic toast immediately; the sidecar has its own sibling toast.
-            toast.dismiss();
+            // The outer loader owns the primary job lifetime and dismisses it after all phases.
 
             // Wait for sidecar if it was spawned.
             if let Some(handle) = sidecar_handle {
@@ -233,7 +244,7 @@ impl LogFileLoader {
 
         for idx in 0..total_lines {
             if idx % 1000 == 0 {
-                if data_source.is_cancelled() {
+                if data_source.is_cancelled() || toast.is_cancel_requested() {
                     tracing::info!("Anomaly scoring cancelled for {}", path.display());
                     toast.set_error("Scoring cancelled".to_string());
                     return;
@@ -342,6 +353,10 @@ impl LogFileLoader {
         let t_prepare = std::time::Instant::now();
         let mut input_lines: Vec<InputLine> = Vec::with_capacity(total_lines);
         for idx in 0..total_lines {
+            if idx % 1_000 == 0 && toast.is_cancel_requested() {
+                tracing::info!("ML scoring cancelled while preparing {}", path.display());
+                return;
+            }
             let Some((ts_ms, message)) = data_source.get_sidecar_message(idx) else {
                 continue;
             };
@@ -385,6 +400,7 @@ impl LogFileLoader {
             model_id,
             &norm_versions_ref,
             &input_lines,
+            &|| toast.is_cancel_requested(),
             &mut |new_entries, partial_result, total| {
                 // Patch only the lines that changed this frame.
                 for (&idx, entry) in new_entries {
@@ -415,8 +431,12 @@ impl LogFileLoader {
                 r
             }
             Err(e) => {
-                tracing::error!("Sidecar score_stream failed: {e}");
-                toast.set_error(format!("Sidecar scoring error: {e}"));
+                if toast.is_cancel_requested() {
+                    tracing::info!("ML scoring cancelled for {}", path.display());
+                } else {
+                    tracing::error!("Sidecar score_stream failed: {e}");
+                    toast.set_error(format!("Sidecar scoring error: {e}"));
+                }
                 return;
             }
         };

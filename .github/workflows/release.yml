@@ -50,10 +50,11 @@ jobs:
             deb: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 2
           ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -128,12 +129,17 @@ jobs:
     name: Publish GitHub release
     needs: build
     runs-on: ubuntu-24.04
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.version.outputs.commit }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 2
           ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -184,3 +190,55 @@ jobs:
           generate_release_notes: true
           files: dist/*
           fail_on_unmatched_files: true
+
+  homebrew:
+    name: Update Homebrew tap
+    needs: publish
+    if: needs.publish.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: 3993457ccf477a3b029a1a1a63d3f7a24ffaac17 # Trusted formula generator revision
+          persist-credentials: false
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: daniel-freiermuth/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          persist-credentials: false
+
+      - name: Generate formula
+        env:
+          TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          version="${TAG#v}"
+          base_url="https://github.com/daniel-freiermuth/logcrab/releases/download/${TAG}"
+          curl --fail --location --output arm.tar.gz "${base_url}/logcrab_aarch64_macos.tar.gz"
+          curl --fail --location --output intel.tar.gz "${base_url}/logcrab_x86_64_macos.tar.gz"
+          python3 source/scripts/write_homebrew_formula.py \
+            --output tap/Formula/logcrab.rb \
+            --version "$version" \
+            --arm-sha256 "$(sha256sum arm.tar.gz | cut -d ' ' -f 1)" \
+            --intel-sha256 "$(sha256sum intel.tar.gz | cut -d ' ' -f 1)"
+
+      - name: Commit formula update
+        working-directory: tap
+        env:
+          TAG: ${{ needs.publish.outputs.tag }}
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git add Formula/logcrab.rb
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "logcrab ${TAG#v}"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HOMEBREW_TAP_TOKEN" | base64 --wrap=0)" push

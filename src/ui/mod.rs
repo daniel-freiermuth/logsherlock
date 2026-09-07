@@ -1,11 +1,13 @@
 pub mod app;
 pub mod filter_highlight;
+pub mod jobs;
 pub mod log_view;
 pub mod session_state;
 pub mod tabs;
 pub mod toasts;
 pub mod windows;
 
+pub use jobs::{JobHandle, JobManager, JobSnapshot};
 pub use log_view::CrabSession;
 pub use toasts::{ProgressToastHandle, ToastManager, ToastSender};
 

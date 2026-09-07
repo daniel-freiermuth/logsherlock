@@ -6,6 +6,7 @@ mod hci;
 mod hfp;
 mod rfcomm;
 
+use anyhow::Context as _;
 use chrono::{DateTime, Local, TimeDelta};
 use egui::Ui;
 use std::fs::File;
@@ -176,7 +177,6 @@ impl BinaryFileType for BtsnoopFileType {
 /// in memory.
 fn parse_btsnoop_to_lines<P: AsRef<Path>>(path: P) -> anyhow::Result<Vec<BtsnoopLogLine>> {
     profiling::scope!("parse_btsnoop_to_lines");
-    use anyhow::Context as _;
     let path = path.as_ref();
     tracing::info!("Starting btsnoop parsing: {}", path.display());
 

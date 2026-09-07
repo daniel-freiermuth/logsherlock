@@ -1,6 +1,7 @@
 // LogCrab - GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Freiermuth
 
+use anyhow::Context as _;
 use chrono::{DateTime, Local, TimeZone};
 use egui::Ui;
 use pcap_parser::traits::PcapReaderIterator;
@@ -1468,7 +1469,6 @@ pub fn parse_pcap_to_lines<P: AsRef<Path>>(path: P) -> anyhow::Result<Vec<PcapLo
 
 fn parse_legacy_pcap_to_lines(path: &Path) -> anyhow::Result<Vec<PcapLogLine>> {
     profiling::scope!("parse_legacy_pcap_to_lines");
-    use anyhow::Context as _;
     tracing::info!("Starting legacy pcap parsing: {}", path.display());
     let file = File::open(path)
         .with_context(|| format!("Failed to open pcap file: {}", path.display()))?;
@@ -1513,7 +1513,6 @@ fn parse_legacy_pcap_to_lines(path: &Path) -> anyhow::Result<Vec<PcapLogLine>> {
 
 fn parse_pcapng_to_lines(path: &Path) -> anyhow::Result<Vec<PcapLogLine>> {
     profiling::scope!("parse_pcapng_to_lines");
-    use anyhow::Context as _;
     tracing::info!("Starting pcapng parsing: {}", path.display());
     let file = File::open(path)
         .with_context(|| format!("Failed to open pcapng file: {}", path.display()))?;

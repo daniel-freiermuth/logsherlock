@@ -21,6 +21,7 @@
 //! The loader thread can own a `ProgressToastHandle` and update it directly.
 //! The `ToastManager` renders all active handles each frame.
 
+use crate::ui::JobHandle;
 use egui::{Align2, Color32, Margin};
 use egui_toast::{Toast, ToastKind, ToastOptions, ToastStyle, Toasts};
 use std::sync::{Arc, Mutex, RwLock};
@@ -101,6 +102,8 @@ pub struct ProgressToastHandle {
     state: Arc<RwLock<ProgressToastState>>,
     /// Shared list of active progress toasts — kept so we can spawn sibling toasts.
     progress_handles: Arc<Mutex<Vec<Arc<RwLock<ProgressToastState>>>>>,
+    /// The corresponding footer job, when this toast represents user-visible work.
+    job: Option<JobHandle>,
     ctx: egui::Context,
 }
 
@@ -124,6 +127,7 @@ impl ProgressToastHandle {
         Self {
             state,
             progress_handles,
+            job: None,
             ctx,
         }
     }
@@ -140,19 +144,43 @@ impl ProgressToastHandle {
         )
     }
 
-    /// Update the progress and message
+    /// Associate this visual progress indicator with a cancellable footer job.
+    #[must_use]
+    pub fn track_job(mut self, job: JobHandle) -> Self {
+        self.job = Some(job);
+        self
+    }
+
+    /// Whether the user has requested cooperative cancellation.
+    #[must_use]
+    pub fn is_cancel_requested(&self) -> bool {
+        self.job
+            .as_ref()
+            .is_some_and(JobHandle::is_cancel_requested)
+    }
+
     pub fn update(&self, progress: f32, message: impl Into<String>) {
-        if let Ok(mut state) = self.state.write() {
+        let message = message.into();
+        let title = if let Ok(mut state) = self.state.write() {
             state.progress = Some(progress);
-            state.message = message.into();
+            state.message.clone_from(&message);
+            state.title.clone()
+        } else {
+            return;
+        };
+        if let Some(job) = &self.job {
+            job.update(title, Some(progress), message);
         }
         self.ctx.request_repaint();
     }
 
-    /// Change the title (e.g., from "Loading" to "Scoring")
     pub fn set_title(&self, title: impl Into<String>) {
+        let title = title.into();
         if let Ok(mut state) = self.state.write() {
-            state.title = title.into();
+            state.title.clone_from(&title);
+        }
+        if let Some(job) = &self.job {
+            job.update(title, None, String::new());
         }
         self.ctx.request_repaint();
     }
@@ -165,10 +193,12 @@ impl ProgressToastHandle {
         self.ctx.request_repaint();
     }
 
-    /// Dismiss the toast immediately.
     pub fn dismiss(&self) {
         if let Ok(mut state) = self.state.write() {
             state.dismissed_at = Some(Instant::now());
+        }
+        if let Some(job) = &self.job {
+            job.finish();
         }
         self.ctx.request_repaint();
     }

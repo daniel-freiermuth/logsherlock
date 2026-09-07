@@ -52,9 +52,8 @@ pub struct ChunkedLoader {
 impl ChunkedLoader {
     /// Drive `input.read()` in adaptive chunks, appending to `data_source`.
     ///
-    /// - Reports progress using `input.bytes_consumed()` divided by `file_size`.
-    /// - Stops early if `data_source.is_cancelled()` is set.
-    /// - Returns `true` if at least one line was loaded.
+    /// - Stops early if the source or its user-visible job is cancelled.
+    /// - Returns `true` if at least one line was loaded before completion or cancellation.
     ///
     /// `file_name` is used only in toast messages (the display name, not the full path).
     pub fn run<FT>(
@@ -76,7 +75,7 @@ impl ChunkedLoader {
         let start = std::time::Instant::now();
 
         loop {
-            if data_source.is_cancelled() {
+            if data_source.is_cancelled() || toast.is_cancel_requested() {
                 tracing::info!("ChunkedLoader: cancellation requested, stopping early");
                 break;
             }

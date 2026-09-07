@@ -531,8 +531,13 @@ impl SidecarClient {
         normalization_versions: &HashMap<&str, u32>,
         lines: &[InputLine],
     ) -> Result<ScoreStreamResult> {
-        let (result, _session) =
-            self.open_score_stream(model_id, normalization_versions, lines, &mut |_, _| {})?;
+        let (result, _session) = self.open_score_stream(
+            model_id,
+            normalization_versions,
+            lines,
+            &|| false,
+            &mut |_, _| {},
+        )?;
         Ok(result)
     }
 
@@ -546,7 +551,13 @@ impl SidecarClient {
         normalization_versions: &HashMap<&str, u32>,
         lines: &[InputLine],
     ) -> Result<(ScoreStreamResult, ExplainSession)> {
-        self.open_score_stream(model_id, normalization_versions, lines, &mut |_, _| {})
+        self.open_score_stream(
+            model_id,
+            normalization_versions,
+            lines,
+            &|| false,
+            &mut |_, _| {},
+        )
     }
 
     /// Like [`score_stream_with_explain`], invoking `on_scores` incrementally
@@ -563,6 +574,7 @@ impl SidecarClient {
         model_id: &str,
         normalization_versions: &HashMap<&str, u32>,
         lines: &[InputLine],
+        is_cancelled: &dyn Fn() -> bool,
         on_scores: &mut dyn FnMut(&HashMap<usize, ScoreEntry>, &ScoreStreamResult, usize),
     ) -> Result<(ScoreStreamResult, ExplainSession)> {
         let total = lines.len();
@@ -570,6 +582,7 @@ impl SidecarClient {
             model_id,
             normalization_versions,
             lines,
+            is_cancelled,
             &mut |new_entries, result| on_scores(new_entries, result, total),
         )
     }
@@ -585,24 +598,36 @@ impl SidecarClient {
         model_id: &str,
         normalization_versions: &HashMap<&str, u32>,
         lines: &[InputLine],
+        is_cancelled: &dyn Fn() -> bool,
         on_frame: &mut dyn FnMut(&HashMap<usize, ScoreEntry>, &ScoreStreamResult),
     ) -> Result<(ScoreStreamResult, ExplainSession)> {
+        profiling::scope!("SidecarClient::open_score_stream");
         let norm_map: HashMap<String, u32> = normalization_versions
             .iter()
             .map(|(k, v)| (k.to_string(), *v))
             .collect();
-        let proto_lines: Vec<proto::InputLine> = lines.iter().map(input_line_to_proto).collect();
+        let mut proto_lines = Vec::with_capacity(lines.len());
+        for (index, line) in lines.iter().enumerate() {
+            if index % 1_000 == 0 && is_cancelled() {
+                bail!("score stream cancelled");
+            }
+            proto_lines.push(input_line_to_proto(line));
+        }
         let model_id = model_id.to_string();
         let n_chunks = proto_lines.len().div_ceil(LINES_PER_CHUNK.max(1));
 
         let rt = Arc::clone(&self.rt);
         let mut client = self.client();
 
-        // Phase 1: send all frames and open the RPC.  This async block owns
-        // only `Send + 'static` data so no unsafe pointer tricks are needed.
-        let (req_tx, mut stream) = self.rt.block_on(async move {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ScoreStreamClientMessage>();
+        // Phase 1: queue all frames and open the RPC. The cancellation future
+        // races the response-header wait; dropping that RPC future sends a
+        // cancellation to tonic's underlying HTTP/2 stream.
+        let (req_tx, mut stream) = self.rt.block_on(async {
+            if is_cancelled() {
+                bail!("score stream cancelled");
+            }
 
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ScoreStreamClientMessage>();
             tx.send(ScoreStreamClientMessage {
                 payload: Some(ClientPayload::Start(StartFrame {
                     api_version: "2".to_string(),
@@ -617,6 +642,9 @@ impl SidecarClient {
                 proto_lines.len()
             );
             for (chunk_index, chunk) in proto_lines.chunks(LINES_PER_CHUNK).enumerate() {
+                if chunk_index % 16 == 0 && is_cancelled() {
+                    bail!("score stream cancelled");
+                }
                 tx.send(ScoreStreamClientMessage {
                     payload: Some(ClientPayload::Lines(LinesFrame {
                         chunk_index: chunk_index as u32,
@@ -632,11 +660,17 @@ impl SidecarClient {
             })?;
             tracing::info!("all {n_chunks} chunks + End frame sent — waiting for Complete");
 
-            let stream = client
-                .score_stream(UnboundedReceiverStream::new(rx))
-                .await
-                .context("ScoreStream RPC failed")?
-                .into_inner();
+            let cancellation = async {
+                while !is_cancelled() {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+            };
+            let stream = tokio::select! {
+                response = client.score_stream(UnboundedReceiverStream::new(rx)) => {
+                    response.context("ScoreStream RPC failed")?.into_inner()
+                }
+                () = cancellation => bail!("score stream cancelled"),
+            };
 
             Ok::<_, anyhow::Error>((tx, stream))
         })?;
@@ -645,11 +679,18 @@ impl SidecarClient {
         // `on_frame` is called directly — no async capture, no unsafe needed.
         let mut result = ScoreStreamResult::default();
         loop {
-            match self
-                .rt
-                .block_on(stream.message())
-                .context("stream read error")?
-            {
+            if is_cancelled() {
+                bail!("score stream cancelled");
+            }
+
+            let message = match self.rt.block_on(tokio::time::timeout(
+                Duration::from_millis(100),
+                stream.message(),
+            )) {
+                Ok(message) => message.context("stream read error")?,
+                Err(_) => continue,
+            };
+            match message {
                 Some(msg) => {
                     if Self::handle_server_msg(msg, &mut result, on_frame)? {
                         break;
@@ -723,5 +764,54 @@ impl SidecarClient {
             }
         }
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SidecarClient;
+    use std::collections::HashMap;
+    use std::net::TcpListener;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn streaming_cancellation_aborts_header_wait() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
+        let port = listener.local_addr().expect("read listener address").port();
+        let (accepted_tx, accepted_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (_connection, _) = listener.accept().expect("accept client connection");
+            accepted_tx.send(()).expect("signal accepted connection");
+            std::thread::sleep(Duration::from_secs(1));
+        });
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancellation = Arc::clone(&cancelled);
+        let cancellation_thread = std::thread::spawn(move || {
+            accepted_rx
+                .recv()
+                .expect("wait for server to accept the connection");
+            std::thread::sleep(Duration::from_millis(50));
+            cancellation.store(true, Ordering::Relaxed);
+        });
+        let start = Instant::now();
+        let result = {
+            let client = SidecarClient::connect("127.0.0.1", port).expect("create lazy client");
+            client.score_stream_streaming(
+                "model",
+                &HashMap::new(),
+                &[],
+                &|| cancelled.load(Ordering::Relaxed),
+                &mut |_, _, _| {},
+            )
+        };
+
+        assert!(result.is_err_and(|error| error.to_string() == "score stream cancelled"));
+        assert!(start.elapsed() < Duration::from_millis(500));
+        cancellation_thread.join().expect("join canceller");
+        server.join().expect("join test server");
     }
 }
