@@ -5,7 +5,7 @@ use std::process::Command;
 
 fn main() {
     // ── Compile proto definitions ─────────────────────────────────────────────
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(false) // server lives in the Python sidecar
         .compile_protos(&["proto/sidecar_v2.proto"], &["proto"])
