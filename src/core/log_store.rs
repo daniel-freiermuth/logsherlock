@@ -1108,6 +1108,16 @@ impl LogStore {
         })
     }
 
+    /// Get the absolute file path of the source for a given `StoreID`
+    pub fn get_source_path(&self, id: &StoreID) -> Option<PathBuf> {
+        profiling::scope!("LogStore::sources::read");
+        let sources = self.sources.read().expect("sources lock poisoned");
+        sources.get(&id.source_id).map(|source| {
+            let path = source.file_path();
+            std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
+        })
+    }
+
     /// Get all source filenames with their stable source IDs
     pub fn get_source_filenames(&self) -> Vec<(u64, String)> {
         profiling::scope!("LogStore::sources::read");

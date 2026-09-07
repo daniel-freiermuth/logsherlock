@@ -629,6 +629,7 @@ impl LogTable {
             score_to_color(line.anomaly_score, dark_mode)
         };
         let source_name = store.get_source_name(&line_idx);
+        let source_path = store.get_source_path(&line_idx);
 
         let column_response = Self::render_all_columns(
             row,
@@ -640,6 +641,7 @@ impl LogTable {
             is_bookmarked,
             color,
             source_name.as_deref(),
+            source_path.as_deref(),
             bookmarked_lines,
             all_filter_highlights,
             dark_mode,
@@ -679,6 +681,7 @@ impl LogTable {
         is_bookmarked: bool,
         color: Color32,
         source_name: Option<&str>,
+        source_path: Option<&std::path::Path>,
         bookmarked_lines: &std::collections::HashMap<StoreID, String>,
         all_filter_highlights: &[FilterHighlight],
         dark_mode: bool,
@@ -693,6 +696,7 @@ impl LogTable {
                 is_bookmarked,
                 color,
                 source_name,
+                source_path,
                 dark_mode,
             ),
             Self::render_line_column(
@@ -762,6 +766,7 @@ impl LogTable {
         is_bookmarked: bool,
         color: Color32,
         source_name: Option<&str>,
+        source_path: Option<&std::path::Path>,
         dark_mode: bool,
     ) -> egui::Response {
         let mut response: Option<egui::Response> = None;
@@ -786,8 +791,12 @@ impl LogTable {
                     .sense(egui::Sense::click()),
             );
 
-            // Tooltip with full source name
-            if let Some(name) = source_name {
+            // Tooltip with the absolute path of the source file
+            if let Some(path) = source_path {
+                label_response
+                    .clone()
+                    .on_hover_text(path.display().to_string());
+            } else if let Some(name) = source_name {
                 label_response.clone().on_hover_text(name);
             }
             response = Some(label_response);
