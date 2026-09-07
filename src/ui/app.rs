@@ -924,6 +924,9 @@ impl LogCrabApp {
                             self.add_file_to_session(path.clone());
                         }
                     }
+                    for path in offer.files {
+                        self.add_file_to_session(path);
+                    }
                 }
                 SessionOfferAction::Cancel => {}
             }
