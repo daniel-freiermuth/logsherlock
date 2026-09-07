@@ -601,6 +601,7 @@ impl SidecarClient {
         is_cancelled: &dyn Fn() -> bool,
         on_frame: &mut dyn FnMut(&HashMap<usize, ScoreEntry>, &ScoreStreamResult),
     ) -> Result<(ScoreStreamResult, ExplainSession)> {
+        profiling::scope!("SidecarClient::open_score_stream");
         let norm_map: HashMap<String, u32> = normalization_versions
             .iter()
             .map(|(k, v)| (k.to_string(), *v))
@@ -773,7 +774,7 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        mpsc, Arc,
     };
     use std::time::{Duration, Instant};
 
@@ -781,13 +782,18 @@ mod tests {
     fn streaming_cancellation_aborts_header_wait() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test listener");
         let port = listener.local_addr().expect("read listener address").port();
+        let (accepted_tx, accepted_rx) = mpsc::channel();
         let server = std::thread::spawn(move || {
             let (_connection, _) = listener.accept().expect("accept client connection");
+            accepted_tx.send(()).expect("signal accepted connection");
             std::thread::sleep(Duration::from_secs(1));
         });
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancellation = Arc::clone(&cancelled);
         let cancellation_thread = std::thread::spawn(move || {
+            accepted_rx
+                .recv()
+                .expect("wait for server to accept the connection");
             std::thread::sleep(Duration::from_millis(50));
             cancellation.store(true, Ordering::Relaxed);
         });
