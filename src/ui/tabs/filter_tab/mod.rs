@@ -280,8 +280,9 @@ impl FilterView {
                 }
                 LogTableEvent::ClassifyLine { line_index, label } => {
                     let source_id = line_index.source_id();
-                    let classified_line_number =
-                        store.get_by_id(&line_index).map_or(0, |l| l.line_number);
+                    // Use the 0-based line index that matches line_id.line_number
+                    // in the sidecar protocol, NOT the 1-based LogLine.line_number.
+                    let classified_line_number = line_index.line_index_within_source();
                     let Some(sidecar_config) = store.sidecar_config() else {
                         tracing::warn!("classify: no sidecar config set");
                         continue;
